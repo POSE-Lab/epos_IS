@@ -1,0 +1,3 @@
+[submodule "epos"]
+	path = epos
+	url = https://github.com/thodan/epos

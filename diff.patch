@@ -1,0 +1,611 @@
+diff --git a/epos_lib/datagen.py b/epos_lib/datagen.py
+index 02fea60..5ccadde 100644
+--- a/epos_lib/datagen.py
++++ b/epos_lib/datagen.py
+@@ -56,10 +56,11 @@ class ObjectModelStore(object):
+     self.frag_sizes = frag_sizes
+     self.prepare_for_projection = prepare_for_projection
+     self.aabb_trees_igl = {}
+-
++    
+     # Dataset-specific model parameters.
+     self.dp_model = dataset_params.get_model_params(
+       config_bop.datasets_path, dataset_name, model_type=model_type)
++   
+ 
+   @property
+   def num_objs(self):
+@@ -224,8 +225,8 @@ class Dataset(object):
+     self.gt_knn_frags = gt_knn_frags
+     self.output_stride = output_stride
+     self.is_training = is_training
+-    self.return_gt_orig = return_gt_orig
+-    self.return_gt_maps = return_gt_maps
++    self.return_gt_orig = return_gt_orig#False #TODO turned to false return_gt_orig
++    self.return_gt_maps = return_gt_maps#False #TODO turned to false return_gt_maps
+     self.should_shuffle = should_shuffle
+     self.should_repeat = should_repeat
+     self.prepare_for_projection = prepare_for_projection
+@@ -276,13 +277,21 @@ class Dataset(object):
+       if model_type_frag_str is None:
+         model_type_frag_str = 'original'
+       tf.logging.info('Type of models: {}'.format(model_type_frag_str))
+-
++      
++      print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
++      #print(self.models)
++      print(self.dataset_name)
++      print(self.num_frags)
++      
+       # Load 3D object models for fragmentation.
+       model_store_frag = ObjectModelStore(
+         dataset_name=self.dataset_name,
+         model_type=model_type_frag,
+         num_frags=self.num_frags,
+         prepare_for_projection=False)
++        
++      print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
++      print("gets here 1 ")
+ 
+       # Fragment the 3D object models.
+       model_store_frag.fragment_models()
+@@ -421,6 +430,7 @@ class Dataset(object):
+     }
+     return tf.parse_single_example(example_proto, features)
+ 
++  #@tf.function
+   def _parse_and_preprocess(self, example_proto):
+     """Function to parse the example proto.
+ 
+@@ -491,14 +501,25 @@ class Dataset(object):
+     gt_obj_quats = None
+     gt_obj_trans = None
+     gt_obj_masks = None
++    #gt_obj_visib_fracts = None # TODO my addition
+     if self.return_gt_orig or self.return_gt_maps:
+-
++      print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
++      print("gets here 1 ")
++      # TODO commented
+       # Decode object annotations (for evaluation).
+       # ------------------------------------------------------------------------
+       # Shape: [num_gts, 1]
++
++      #print("object id: ", feat['image/object/id'])
+       gt_obj_ids = tf.sparse_tensor_to_dense(feat['image/object/id'])
+       gt_obj_visib_fracts = tf.sparse_tensor_to_dense(
+         feat['image/object/visibility'])
++      #gt_obj_visib_fracts = tf.sparse_tensor_to_dense([])
++      #gt_obj_ids = tf.sparse_tensor_to_dense([])
++      print("gt_obj_ids", gt_obj_ids[0])
++      print("*******************************************************************")
++
++      print("gt_obj_visib_fracts", gt_obj_visib_fracts[0])
+ 
+       # Shape: [num_gts, 4]
+       gt_obj_quats = tf.stack([
+@@ -514,12 +535,27 @@ class Dataset(object):
+         tf.sparse_tensor_to_dense(feat['image/object/pose/t2']),
+         tf.sparse_tensor_to_dense(feat['image/object/pose/t3'])
+       ], axis=1)
++      # gt_obj_quats = tf.stack([
++      #   tf.sparse_tensor_to_dense([]),
++      #   tf.sparse_tensor_to_dense([]),
++      #   tf.sparse_tensor_to_dense([]),
++      #   tf.sparse_tensor_to_dense([])
++      # ], axis=1)
++      #
++      # # Shape: [num_gts, 3]
++      # gt_obj_trans = tf.stack([
++      #   tf.sparse_tensor_to_dense([]),
++      #   tf.sparse_tensor_to_dense([]),
++      #   tf.sparse_tensor_to_dense([])
++      # ], axis=1)
+ 
+       # Object instance masks.
+       # ------------------------------------------------------------------------
+       # Shape: [num_gts, height, width]
+       gt_obj_masks = self._decode_png_instance_masks(
+         feat['image/object/mask'], im_w_orig, im_h_orig)
++      # gt_obj_masks = self._decode_png_instance_masks(
++      #   [], im_w_orig, im_h_orig)
+ 
+       # Resize the masks to the scaled input size.
+       gt_obj_masks = tf.cast(tf.expand_dims(gt_obj_masks, axis=3), tf.uint8)
+@@ -566,6 +602,7 @@ class Dataset(object):
+         gt_obj_quats = tf.gather(gt_obj_quats, kept_gt_ids)
+         gt_obj_trans = tf.gather(gt_obj_trans, kept_gt_ids)
+         gt_obj_masks = tf.gather(gt_obj_masks, kept_gt_ids)
++      # TODO commented
+ 
+       # Make sure the object masks are exclusive (this is assumed when
+       # constructing the ground-truth fields).
+@@ -671,6 +708,7 @@ class Dataset(object):
+ 
+     return sample
+ 
++  #@tf.function
+   def get_one_shot_iterator(self):
+     """Gets an iterator that iterates across the dataset once.
+ 
+@@ -682,7 +720,7 @@ class Dataset(object):
+     # TODO: Parallelize dataset reading.
+     num_readers = None
+ 
+-    files = self._get_all_tfrecords()
++    files = self._get_all_tfrecords() # TODO see for tfrecords
+     dataset = tf.data.Dataset.from_tensor_slices(files)
+ 
+     dataset = dataset.interleave(
+@@ -690,6 +728,46 @@ class Dataset(object):
+         x, num_parallel_reads=num_readers).map(
+         self._parse_and_preprocess, num_parallel_calls=num_readers),
+       cycle_length=len(files), block_length=1, num_parallel_calls=num_readers)
++    #
++    # print("*******************************")
++    # print("Befire")
++    # print(len(files))
++    # print("dataset: ", dataset)
++
++    # import glob
++    # import cv2
++    # files = []
++    # for img in glob.glob("/home/lele/Codes/epos/datasets/carObj1/test_primesense/000001/rgb/*.png"):
++    #   n = cv2.imread(img)
++    #   files.append(n)
++    # datasetrgb = tf.data.Dataset.list_files("/home/lele/Codes/epos/datasets/carObj1/test_primesense/000001/rgb/*.png")
++    # datasetdepth = tf.data.Dataset.list_files("/home/lele/Codes/epos/datasets/carObj1/test_primesense/000001/depth/*.png")
++    # datasetmasks = tf.data.Dataset.list_files("/home/lele/Codes/epos/datasets/carObj1/test_primesense/000001/mask/*.png")
++    # datasetmasks_visib = tf.data.Dataset.list_files("/home/lele/Codes/epos/datasets/carObj1/test_primesense/000001/mask_visib/*.png")
++    # datasetgt = tf.data.Dataset.list_files("/home/lele/Codes/epos/datasets/carObj1/test_primesense/000001/scene_gt.json")
++    # datasetgt_info = tf.data.Dataset.list_files("/home/lele/Codes/epos/datasets/carObj1/test_primesense/000001/scene_gt_info.json")
++    # dataset = tf.data.Dataset.zip((datasetrgb, datasetdepth, datasetmasks, datasetmasks_visib, datasetgt, datasetgt_info))
++
++    print("++++++++++++++++++++++++++++++++++++++++++++")
++    print("Dataset os ook")
++
++
++
++    # print("////////////////////////////////////////////////////////////////////////////////////////////////")
++    # tf.config.run_functions_eagerly(True)
++    # for ele in dataset:
++    #   print("Dataset slices: ")
++    #   print(ele.numpy())
++
++    # dataset = dataset.interleave(
++    #   lambda x: tf.data.TFRecordDataset(
++    #     x, num_parallel_reads=num_readers).map(
++    #     self._parse_and_preprocess, num_parallel_calls=num_readers),
++    #   cycle_length=len(files), block_length=1, num_parallel_calls=num_readers)
++    # print("*******************************")
++    # print("After")
++    # print(len(files))
++    # print("dataset1: ", dataset)
+ 
+     if self.should_shuffle:
+       dataset = dataset.shuffle(buffer_size=self.buffer_size)
+diff --git a/epos_lib/fragment_test.py b/epos_lib/fragment_test.py
+index 7517d94..77e10a0 100644
+--- a/epos_lib/fragment_test.py
++++ b/epos_lib/fragment_test.py
+@@ -15,7 +15,7 @@ def fragmentation_fps_test():
+   output_dir = 'fragmentation_test_output'
+   misc.ensure_dir(output_dir)
+ 
+-  datasets = ['hb', 'ycbv', 'tless', 'lmo', 'icbin', 'itodd', 'tudl']
++  datasets = ['hb', 'ycbv', 'tless', 'lmo', 'icbin', 'itodd', 'tudl', 'car', 'carObj1', 'carObj13']
+ 
+   for dataset in datasets:
+ 
+diff --git a/external/bop_toolkit b/external/bop_toolkit
+--- a/external/bop_toolkit
++++ b/external/bop_toolkit
+@@ -1 +1 @@
+-Subproject commit 53150b649467976b4f619fbffb9efe525c7e11ca
++Subproject commit 53150b649467976b4f619fbffb9efe525c7e11ca-dirty
+diff --git a/external/progressive-x b/external/progressive-x
+--- a/external/progressive-x
++++ b/external/progressive-x
+@@ -1 +1 @@
+-Subproject commit 5ee5f346f23b2b3a5f7400364db36efbb686f117
++Subproject commit 5ee5f346f23b2b3a5f7400364db36efbb686f117-dirty
+diff --git a/scripts/check_train_input.py b/scripts/check_train_input.py
+old mode 100644
+new mode 100755
+index 49708fd..f5590cd
+--- a/scripts/check_train_input.py
++++ b/scripts/check_train_input.py
+@@ -28,7 +28,7 @@ flags = tf.app.flags
+ FLAGS = flags.FLAGS
+ 
+ flags.DEFINE_integer(
+-  'num_batches_to_check', 10,
++  'num_batches_to_check',1500,
+   'Number of batches to check.')
+ flags.DEFINE_boolean(
+   'print_shapes', False,
+diff --git a/scripts/create_example_list.py b/scripts/create_example_list.py
+old mode 100644
+new mode 100755
+index 0d121d4..fd9ce0f
+--- a/scripts/create_example_list.py
++++ b/scripts/create_example_list.py
+@@ -30,6 +30,7 @@ from bop_toolkit_lib import inout
+ from epos_lib import common
+ from epos_lib import config
+ from epos_lib import tfrecord
++import glob
+ 
+ 
+ # Flags (other common flags are defined in epos_lib/common.py.
+@@ -92,7 +93,20 @@ def main(_):
+     example_list = []
+     for scene_id in FLAGS.scene_ids:
+       scene_gt_fpath = dp_split['scene_gt_tpath'].format(scene_id=scene_id)
+-      im_ids = inout.load_scene_gt(scene_gt_fpath).keys()
++
++      # TODO car
++      scene_ids_fromFolder = os.path.split(scene_gt_fpath)
++      imagesListed = glob.glob(os.path.join(str(scene_ids_fromFolder[0]) + '/rgb', '*.png'))
++      im_ids=[]
++      for i in range(0, len(imagesListed)):
++        imagesListed_withoutPath = (imagesListed[i].rsplit('/'))[-1]  # cut off path
++        imagesListed_withoutPathAndFormat = (imagesListed_withoutPath.split('.'))[0]  # cut off format
++        im_ids.append(int(imagesListed_withoutPathAndFormat))
++      im_ids = sorted(im_ids)
++      #print(im_ids)
++      # TODO car
++
++      #im_ids = inout.load_scene_gt(scene_gt_fpath).keys() # TODO car. this is the default for im_ids. Use the above instead to read images directly from the images folder, without needing gt
+       for im_id in sorted(im_ids):
+         example_list.append({'scene_id': scene_id, 'im_id': im_id})
+ 
+diff --git a/scripts/create_tfrecord.py b/scripts/create_tfrecord.py
+old mode 100644
+new mode 100755
+index 640434a..4af436a
+--- a/scripts/create_tfrecord.py
++++ b/scripts/create_tfrecord.py
+@@ -101,6 +101,7 @@ def create_tf_example(
+   gts_info = None
+   mask_visib_fpaths = None
+   if FLAGS.add_gt:
++    #print(scene_gt,im_id)
+     gts = scene_gt[scene_id][im_id]
+     gts_info = scene_gt_info[scene_id][im_id]
+ 
+diff --git a/scripts/eval.py b/scripts/eval.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/eval.sh b/scripts/eval.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/infer.py b/scripts/infer.py
+old mode 100644
+new mode 100755
+index 5f15bde..3da868d
+--- a/scripts/infer.py
++++ b/scripts/infer.py
+@@ -6,7 +6,7 @@
+ Example:
+ python infer.py --model=ycbv-bop20-xc65-f64
+ """
+-
++from statistics import mean #panos
+ import os
+ import os.path
+ import time
+@@ -124,16 +124,16 @@ flags.DEFINE_boolean(
+   'vis', False,
+   'Global switch for visualizations.')
+ flags.DEFINE_boolean(
+-  'vis_gt_poses', True,
++  'vis_gt_poses', False, #TODO default is True
+   'Whether to visualize the GT poses.')
+ flags.DEFINE_boolean(
+   'vis_pred_poses', True,
+   'Whether to visualize the predicted poses.')
+ flags.DEFINE_boolean(
+-  'vis_gt_obj_labels', True,
++  'vis_gt_obj_labels', False, #TODO default is True
+   'Whether to visualize the GT object labels.')
+ flags.DEFINE_boolean(
+-  'vis_pred_obj_labels', True,
++  'vis_pred_obj_labels',False, #TODO default is True
+   'Whether to visualize the predicted object labels.')
+ flags.DEFINE_boolean(
+   'vis_pred_obj_confs', False,
+@@ -163,6 +163,7 @@ def visualize(
+     renderer: Renderer of class bop_renderer.Renderer().
+     vis_dir: Directory where the visualizations will be saved.
+   """
++  
+   tf.logging.info('Visualization for: {}'.format(
+     samples[common.IMAGE_PATH][0].decode('utf8')))
+ 
+@@ -373,6 +374,9 @@ def process_image(
+   (samples, predictions) = sess.run([samples, predictions])
+   run_times['prediction'] = time.time() - time_start
+ 
++  print("--------------------------------------------------------------")
++  print("OK_proc")
++
+   # Scene and image ID's.
+   scene_id = samples[common.SCENE_ID][0]
+   im_id = samples[common.IM_ID][0]
+@@ -380,6 +384,19 @@ def process_image(
+   # Intrinsic parameters.
+   K = samples[common.K][0]
+ 
++  # # TODO assign random gt
++  # if task_type == common.LOCALIZATION:
++  #   gt_poses = []
++  #   gt_obj_ids = [2]
++  #   print("//////////////////////////////////////////////////")
++  #   print(gt_obj_ids)
++  #   for gt_id in range(len(gt_obj_ids)):
++  #     R = [-0.9991049986141801, 0.03666771808557338, -0.027292385658971012, 0.044079907657897294, 0.6148651358553637, -0.7874018525751658, -0.012322751345548178, -0.7879278156501389, -0.6159186241649777]
++  #     t = [21.72255945307404, -147.193606078239, 635.7443407074654]
++  #     gt_poses.append({'obj_id': gt_obj_ids[gt_id], 'R': R, 't': t})
++  # else:
++  #   gt_poses = None
++  # TODO commented
+   if task_type == common.LOCALIZATION:
+     gt_poses = []
+     gt_obj_ids = samples[common.GT_OBJ_IDS][0]
+@@ -390,6 +407,7 @@ def process_image(
+       gt_poses.append({'obj_id': gt_obj_ids[gt_id], 'R': R, 't': t})
+   else:
+     gt_poses = None
++  # TODO commented
+ 
+   # Establish many-to-many 2D-3D correspondences.
+   time_start = time.time()
+@@ -482,7 +500,7 @@ def process_image(
+         min_coverage=FLAGS.min_hypothesis_quality,
+         min_triangle_area=FLAGS.min_triangle_area,
+         min_point_number=6,
+-        max_model_number=num_instances,
++        max_model_number=num_instances ,
+         max_model_number_for_optimization=FLAGS.max_model_number_for_pearl,
+         use_prosac=FLAGS.use_prosac,
+         log=False)
+@@ -577,7 +595,7 @@ def main(unused_argv):
+   vis_dir = os.path.join(model_dir, 'vis')
+   tf.gfile.MakeDirs(vis_dir)
+ 
+-  # TFRecord files used for training.
++  # TFRecord files used for training. # TODO see for tfrecords
+   tfrecord_names = FLAGS.infer_tfrecord_names
+   if not isinstance(FLAGS.infer_tfrecord_names, list):
+     tfrecord_names = [FLAGS.infer_tfrecord_names]
+@@ -604,7 +622,7 @@ def main(unused_argv):
+     # Dataset provider.
+     dataset = datagen.Dataset(
+       dataset_name=FLAGS.dataset,
+-      tfrecord_names=tfrecord_names,
++      tfrecord_names=tfrecord_names, # TODO see for tfrecords
+       model_dir=model_dir,
+       model_variant=FLAGS.model_variant,
+       batch_size=1,
+@@ -640,7 +658,20 @@ def main(unused_argv):
+       tf.logging.info('Renderer initialized.')
+ 
+     # Inputs.
+-    samples = dataset.get_one_shot_iterator().get_next()
++    samples = dataset.get_one_shot_iterator().get_next() # TODO see for tfrecords
++   #  print("////////////////////////////////////////////////////////////////")
++   #  print("Samples: ", samples)
++   #  print("Sample keys: ", samples.keys())
++   #  print('000000000000')
++   #  #rgb = np.squeeze(samples[common.IMAGE][0])
++   #  #proto_tensor = tf.compat.v1.make_tensor_proto(samples[common.IMAGE][0])  # convert `tensor a` to a proto tensor
++   #  print('11111111111111111')
++   #  #print("proto: ", proto_tensor)
++   #  #npImage = tf.make_ndarray(proto_tensor)
++   #  #print('22222222222222222222')
++   # # print("Image shape is: ", rgb.shape())
++   #  #print("Image type is: ", type((samples[common.IMAGE][0]).eval()))
++   #  #cv2.imwrite('/home/lele/Desktop', samples[common.IMAGE][0])
+ 
+     # A map from output type to the number of associated channels.
+     outputs_to_num_channels = common.get_outputs_to_num_channels(
+@@ -652,10 +683,10 @@ def main(unused_argv):
+         crop_size=list(map(int, FLAGS.infer_crop_size)),
+         atrous_rates=FLAGS.atrous_rates,
+         encoder_output_stride=FLAGS.encoder_output_stride)
+-
++    print(dataset.num_objs)
+     # Construct the inference graph.
+     predictions = model.predict(
+-        images=samples[common.IMAGE],
++        images=samples[common.IMAGE], # TODO see for tfrecords
+         model_options=model_options,
+         upsample_logits=FLAGS.upsample_logits,
+         image_pyramid=FLAGS.image_pyramid,
+@@ -677,7 +708,7 @@ def main(unused_argv):
+     tf.logging.info('Starting inference at: {}'.format(time_str))
+     tf.logging.info('Inference with model: {}'.format(checkpoint_path))
+ 
+-    # Scaffold for initialization.
++     # Scaffold for initialization.
+     scaffold = tf.train.Scaffold(
+       init_op=tf.global_variables_initializer(),
+       saver=tf.train.Saver(var_list=misc.get_variable_dict()))
+@@ -687,8 +718,8 @@ def main(unused_argv):
+       tf_config = tf.ConfigProto(device_count={'GPU': 0})
+     else:
+       tf_config = tf.ConfigProto()
+-      # tf_config.gpu_options.allow_growth = True  # Only necessary GPU memory.
+-      tf_config.gpu_options.allow_growth = False
++      tf_config.gpu_options.allow_growth = True  # Only necessary GPU memory. # lele
++      #tf_config.gpu_options.allow_growth = False
+ 
+     # Nodes that can use multiple threads to parallelize their execution will
+     # schedule the individual pieces into this pool.
+@@ -705,6 +736,7 @@ def main(unused_argv):
+         scaffold=scaffold,
+         master=FLAGS.master,
+         checkpoint_filename_with_path=checkpoint_path)
++    inf_time_no_pred =[] #panos
+     with tf.train.MonitoredSession(
+           session_creator=session_creator, hooks=None) as sess:
+ 
+@@ -714,7 +746,7 @@ def main(unused_argv):
+         # Estimate object poses for the current image.
+         poses, run_times = process_image(
+             sess=sess,
+-            samples=samples,
++            samples=samples, # TODO see for tfrecords
+             predictions=predictions,
+             im_ind=im_ind,
+             crop_size=dataset.crop_size,
+@@ -725,7 +757,9 @@ def main(unused_argv):
+             infer_name=FLAGS.infer_name,
+             infer_dir=infer_dir,
+             vis_dir=vis_dir)
+-
++        print("--------------------------------------------------------------")
++        print("OK")
++        inf_time_no_pred.append(run_times['establish_corr']+run_times['fitting']) #panos
+         # Note that the first image takes longer time (because of TF init).
+         tf.logging.info(
+           'Image: {}, prediction: {:.3f}, establish_corr: {:.3f}, '
+@@ -738,6 +772,9 @@ def main(unused_argv):
+           first_im_poses_num = len(poses)
+         im_ind += 1
+ 
++    print("--------------------------------------------------------------")
++    print("OK")
++
+     # Set the time of pose estimates from the first image to the average time.
+     # Tensorflow takes a long time on the first image (because of init).
+     time_avg = 0.0
+@@ -748,6 +785,11 @@ def main(unused_argv):
+     for i in range(first_im_poses_num):
+       poses_all[i]['time'] = time_avg
+ 
++    print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
++    print("gets here")
++    print(poses_all)
++    print("Average est corr and fitting time :", mean(inf_time_no_pred)) #panos
++
+     # Save the estimated poses in the BOP format:
+     # https://bop.felk.cvut.cz/challenges/bop-challenge-2020/#formatofresults
+     if FLAGS.save_estimates:
+diff --git a/scripts/launch_tensorboard.py b/scripts/launch_tensorboard.py
+old mode 100644
+new mode 100755
+index 0846f5e..8bfbd3b
+--- a/scripts/launch_tensorboard.py
++++ b/scripts/launch_tensorboard.py
+@@ -5,7 +5,7 @@
+ Example:
+ python launch_tensorboard.py
+   --models=tless-bop20-xc65-f64,ycbv-bop20-xc65-f64
+-  --port=8008
++  --port=localhost:8008
+ """
+ 
+ import os
+@@ -16,7 +16,7 @@ parser = argparse.ArgumentParser()
+ parser.add_argument(
+   '--models', help='Comma-separated names of models.')
+ parser.add_argument(
+-  '--port', help='HTTP port to run TensorBoard on.', default=8008)
++  '--port', help='HTTP port to run TensorBoard on.', default=8096)
+ args = parser.parse_args()
+ 
+ model_list = args.models.split(',')
+diff --git a/scripts/tee.py b/scripts/tee.py
+old mode 100644
+new mode 100755
+diff --git a/scripts/train.py b/scripts/train.py
+old mode 100644
+new mode 100755
+index 454f70d..4194ae6
+--- a/scripts/train.py
++++ b/scripts/train.py
+@@ -17,6 +17,8 @@ from epos_lib import loss
+ from epos_lib import misc
+ from epos_lib import model
+ from epos_lib import train_utils
++import matplotlib.pyplot as plt
++import time
+ 
+ 
+ # Flags (other common flags are defined in epos_lib/common.py; the flag values
+@@ -54,7 +56,7 @@ flags.DEFINE_integer(
+   'log_steps', 100,
+   'Display logging information at every log_steps.')
+ flags.DEFINE_integer(
+-  'save_interval_steps', 50000,
++  'save_interval_steps', 20000,   #50000
+   'How often, in number of training steps, we save the model to disk.')
+ flags.DEFINE_integer(
+   'max_checkpoints_to_keep', 40,
+@@ -101,13 +103,13 @@ flags.DEFINE_float(
+   'learning_power', 0.9,
+   'The power value used in the poly learning policy.')
+ flags.DEFINE_integer(
+-  'train_steps', 2000000,
++  'train_steps', 2000000,   #2000000
+   'The number of steps used for training')
+ flags.DEFINE_float(
+   'momentum', 0.9,
+   'The momentum value to use')
+ flags.DEFINE_integer(
+-  'train_batch_size', 1,
++  'train_batch_size', 2,
+   'The number of images in each batch during training.')
+ # Use 0.00004 for MobileNet-V2 or Xception model and 0.0001 for ResNet model.
+ flags.DEFINE_float(
+@@ -402,11 +404,18 @@ def _train_epos_model(iterator,
+       print_inputs += [name + ':', loss]
+ 
+     should_log = math_ops.equal(math_ops.mod(global_step, FLAGS.log_steps), 0)
++    # TODO spreader define path TODO car
+     print_op = tf.cond(
+         should_log,
+-        lambda: tf.print(*print_inputs),
++        lambda: tf.print(*print_inputs, output_stream="file:////media/UbuntuStorage/datasets/bop/store/tf_models/IndustryShapesClassicV2_e130/logs/output.txt"), #TODO car define path
++        #lambda: tf.print(*print_inputs, output_stream="file:///media/lele/D/Spreader_runs/Results/Run5/output.txt"), # TODO car
+         lambda: tf.no_op())
+ 
++    # print_op = tf.cond(
++    #     should_log,
++    #     lambda: tf.print(*print_inputs),
++    #     lambda: tf.no_op())
++
+     # Add a summary for the total loss.
+     # tf.summary.scalar('losses/total_loss', total_loss)
+     with tf.control_dependencies([update_op, print_op]):
+@@ -419,6 +428,7 @@ def _train_epos_model(iterator,
+ 
+ 
+ def main(unused_argv):
++  time_start = time.time()
+   tf.logging.set_verbosity(tf.logging.INFO)
+ 
+   # Model folder.
+@@ -489,7 +499,7 @@ def main(unused_argv):
+           allow_soft_placement=True, log_device_placement=False)
+ 
+       # tf_config.gpu_options.allow_growth = True  # Only necessary GPU memory.
+-      tf_config.gpu_options.allow_growth = False
++      tf_config.gpu_options.allow_growth = True
+ 
+       # Nodes that can use multiple threads to parallelize their execution
+       # will schedule the individual pieces into this pool.
+@@ -553,6 +563,8 @@ def main(unused_argv):
+         ) as sess:
+           while not sess.should_stop():
+             sess.run([train_tensor])
++  trainingTime = time.time() - time_start
++  print("Training finished in: ", trainingTime)
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/scripts/train.sh b/scripts/train.sh
+old mode 100644
+new mode 100755
